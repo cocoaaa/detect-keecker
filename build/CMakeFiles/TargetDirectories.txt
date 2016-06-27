@@ -1,0 +1,1 @@
+/Users/hayley/opencv-stuff/Playground/detect/build/CMakeFiles/detect.dir
