@@ -17,20 +17,20 @@ using namespace std;
 using namespace cv;
 
 /** Function Headers */
-vector<Rect> detect_haar(Mat& frame);
-vector<Point2f> detect_blobs(Mat& frame, Rect& ROI, SimpleBlobDetector::Params& params);
-int myfilter(Mat& im_src, vector<KeyPoint>& keypoints);
-int getBiggestIdx(vector<KeyPoint>& keypoints);
+vector<Rect> detect_haar(const Mat& frame);
+Point2f detect_blobs(const Mat& frame, const Rect& ROI, const SimpleBlobDetector::Params& params);
+int myfilter(const Mat& im_src, const vector<KeyPoint>& keypoints);
+int getBiggestIdx(const vector<KeyPoint>& keypoints);
+Rect scaleRect(const Mat& im, const Rect& rect, double scale);
 
 void test_detect_blobs();
 Rect detect_movement(Mat& frame);
 Rect getBbox(const Mat& img, Mat& mask, Mat& dst);
-vector<KeyPoint> detect_blobs2(Mat& frame, vector<Rect> ROIs);
 
 /** Global variables */
 mutex mtx;
 Mat frame;
-String keecker_cascade_name = "../classifier/haarcascade_keecker.xml";
+String keecker_cascade_name = "../classifier/haarcascade_keecker2.xml";
 CascadeClassifier keecker_cascade;
 string IMG_PATH = "/Users/hayley/opencv-haar-classifier-training/positive_images/";
 string IMG_PATH2 = "/Users/hayley/opencv-stuff/Playground/detect/images/test/";
@@ -38,9 +38,9 @@ int COUNT=0;
 Mat PREV_FRAME, DIFF;
 Rect PREV_BBOX;
 Mat H_debug = (Mat_<double>(3,3) << 
-0.4489607764550727, 0.1351003751241841, -154.9639265640121,
- 0.01191502411752055, 0.8548885289745943, -68.83102780474229,
- -2.816918868191362e-05, 0.001144330460324215, 1);
+0.4727188590049271, 0.2447096686753352, -195.0549601305597,
+ -0.001365389089110007, 0.9716478026383405, 6.518203707308869,
+ 5.496273033415821e-06, 0.001633761706771382, 1);
 
 
 void fastLoopCode() {
@@ -96,7 +96,7 @@ void test_detect_blobs(){
         cout << "maxArea: " << params.maxArea << endl;
 
         params.filterByCircularity = true;
-        params.minCircularity = 0.7;
+        params.minCircularity = 0.6;
 
         params.filterByConvexity = true;
         params.minConvexity = 0.95;
@@ -104,7 +104,6 @@ void test_detect_blobs(){
         waitKey(0);
     }
 }
-
 void test_detect_blobs2(){
     
     cout << "Test detect_blobs2....." << endl;
@@ -152,7 +151,17 @@ void test_detect_blobs2(){
         waitKey(0);
     }
 }
-
+void test_scaleRect(){
+    Mat im = Mat::zeros(100,100, CV_64FC3);
+    Rect r0(50,50,30,30);
+    Point2f p0(r0.x, r0.y);
+    Point2f p1(r0.x+r0.width, r0.y+r0.height);
+    rectangle(im, p0,p1,Scalar(255,0,0));//Blue
+    
+    Rect r1 = scaleRect(im, r0, 5);
+    rectangle(im, Point2f(r1.x, r1.y), Point2f(r1.x+r1.width, r1.y+r1.height),Scalar(0,255,0));//Green
+    imshow("test scale", im);
+}
 
 int main(int argc, char** argv){
 
@@ -164,7 +173,7 @@ int main(int argc, char** argv){
     //-- Load keecker cascade
     if( !keecker_cascade.load( keecker_cascade_name ) ){ printf("--(!)Error loading\n"); return -1; };
     //test_detect_blobs2();
-    
+    //test_scaleRect();
     while((key = waitKey(30)) != 27){ 
         Mat m;
         mtx.lock();
@@ -173,36 +182,30 @@ int main(int argc, char** argv){
         }
         mtx.unlock();
         if (!m.empty()) {
+            //--Preprocess the frame
             Mat gray, blurred, binary, adp_binary;     
             int total_pixels = m.size().width * m.size().height;
-            cvtColor(m, gray, CV_BGR2GRAY);
-            imshow("Gray", gray);
-            threshold( gray, binary, 120, 255,THRESH_BINARY);
-            imshow("binary", binary);
-            GaussianBlur(gray, blurred, Size(3,3),0,0 );
+            GaussianBlur(m, blurred, Size(3,3),0,0 );
+            cvtColor(blurred, gray, CV_BGR2GRAY);
+            threshold( gray, binary, 122, 255,THRESH_BINARY);//todo: dynamic threshold selection?
 //            Rect ROI = detect_movement(blurred);      
-            cout << "here" << endl;
-            adaptiveThreshold(blurred, adp_binary, 255,CV_ADAPTIVE_THRESH_GAUSSIAN_C,CV_THRESH_BINARY,5,1 );   
-            imshow("adp-threshed", adp_binary);
-            
-            //--Set parameters
-            //-- Parmeters setting
-            cv::SimpleBlobDetector::Params params; 
-            params.filterByArea = true;
-            params.minArea = 3.0;//todo: percentage of total pixel
-            params.maxArea = round(total_pixels*0.01);//todo
-            cout << "maxArea: " << params.maxArea << endl;
-
-            params.filterByCircularity = true;
-            params.minCircularity = 0.65;
-
-            params.filterByConvexity = true;
-            params.minConvexity = 0.95;
             
             //--Detect and track keecker using detect_haar (classifier)
             vector<Point2f> srcs,dsts;
         
             //--Detect and track blobs within the keecker area
+                //--Set parameters for blob detector
+                //-- Parmeters setting
+            cv::SimpleBlobDetector::Params params; 
+            params.filterByArea = true;
+            params.minArea = 3.0;//todo: percentage of total pixel
+//            params.maxArea = round(total_pixels*0.01);//todo
+//            cout << "max area: " << params.maxArea << endl;
+            params.filterByCircularity = true;
+            params.minCircularity = 0.65;
+
+            params.filterByConvexity = true;
+            params.minConvexity = 0.95;
             vector<Rect> keeckers = detect_haar(m);
             for (int i =0; i<(int)keeckers.size(); i++){
                 Point2f p(keeckers[i].x, keeckers[i].y );
@@ -210,10 +213,67 @@ int main(int argc, char** argv){
                 cout << p << endl;
                 srcs.push_back(p);
             }
-            vector<KeyPoint> blobs;
-            Rect ROI = keeckers[0];
-            detect_blobs(binary,ROI,params);//
-//            
+            //--Draw keeckers
+            for (int i=0; i<(int)keeckers.size(); i++){
+                Point2f p1(keeckers[i].x, keeckers[i].y);
+                Point2f p2(keeckers[i].x+keeckers[i].width, keeckers[i].y+keeckers[i].width);
+                rectangle(m, p1, p2, Scalar(255,255,0),2); //color is the last para
+            }
+            
+            Point2f blob;
+            Point2f temp;
+            Rect ROI;
+            for (int i=0; i<keeckers.size(); i++){
+                ROI = keeckers[i];
+                ROI = scaleRect(m,ROI,4);//DEBUG
+                
+                //--Set maxArea parameter
+                int roi_npixels = ROI.width*ROI.height;
+                params.maxArea = round(roi_npixels*0.01);//todo
+                cout << "max area: " << params.maxArea << endl;
+                blob = detect_blobs(binary,ROI,params);
+                
+                int n_iter=0;
+                int MAX_ITER = 3;
+                double scale = 2.0;//todo: input parameter
+                double step = 2;
+                while(false){
+                //while (n_iter<MAX_ITER && blob == Point2f(0,0)){
+                    cout << "still no blob, scaling and then searching again" << endl;
+                    //Debug for scaleRect
+                    //rectangle(m, Point2f(ROI.x,ROI.y), Point2f(ROI.x+ROI.width, ROI.y+ROI.height),Scalar(0,0,0),1,8,0);
+
+                    ROI = scaleRect(m, ROI, scale);
+                    //Debug drawing for scaleRect
+                    rectangle(m, Point2f(ROI.x,ROI.y), Point2f(ROI.x+ROI.width, ROI.y+ROI.height),Scalar(255,0,0),1,8,0);
+                    //imshow("Debug", m);
+                    blob = detect_blobs(binary,ROI,params);
+                    scale *= step;
+                    n_iter ++;
+                }
+                
+                if (blob != Point2f(0,0)){
+                    //--Draw a blob for a keecker
+                    temp.x = blob.x+3; temp.y = blob.y+3;
+                    Point2f dp(3,3);
+                    Point2f blob_tl = blob - dp;
+                    Point2f blob_br = blob + dp;
+                    rectangle(m, blob_tl, blob_br, Scalar(0,255,0),2,8,0 );
+                    cout << "Blob for keecker " << i << " :" << blob << endl;
+                    
+                    //Find the blob position at the world coord using H_debug
+                    vector<Point2f> blob_vec = {blob};
+                    vector<Point2f> blob_world;
+                    perspectiveTransform(blob_vec, blob_world, H_debug);
+                    cout << "   in world coord: " << blob_world[0] << endl;
+                }else{
+                    cout << "No blob detected for this keecker:(.." << endl;
+                }
+            }
+            
+            //--show
+            imshow("blobs in the world", m);
+
 //            vector<Point2f> srcs, dsts;
 //            srcs = detect_blobs(blurred, ROI, params );
 //            //--Get the world coordinates
@@ -228,32 +288,20 @@ int main(int argc, char** argv){
 //            //Show rectangle positions
 //            rectangle(blurred, ROI.tl(), ROI.br(), Scalar(255,0,0), 1, 8, 0 ); //BLUE
 
-
 //            //--Get the world coordinates
-//            /*
 //            perspectiveTransform(srcs, dsts, H_debug);
-//            
 //            for (int i=0; i<(int)dsts.size(); i++){
 //                cout << "world coordinates: " << dsts[i] << endl;
 //                Point2f temp(dsts[i].x+3, dsts[i].y+3);
 ////                rectangle(blurred, dsts[i] , temp, Scalar(255,0,0), 2, 8, 0 );
 //            }
-//            */
-//            //imshow("MAIN", blurred);
 //            //End of haar detection 
         }
     }
-//    
     fastLoop.join();
-//
-//    
-//
-//
-    
 }
 
-vector<Rect> detect_haar(Mat& frame){
-    vector<Rect> keeckers;
+vector<Rect> detect_haar(const Mat& frame){
     Mat gray;
     
     cvtColor(frame, gray, CV_BGR2GRAY);
@@ -261,36 +309,16 @@ vector<Rect> detect_haar(Mat& frame){
     //--Detect keeckers
     //--Set parameters
     const float scale_factor(1.2f);
-    const int min_neighbors(10);
+    const int min_neighbors(15);
     vector<int> reject_levels;
     vector<double> level_weights;
     
+    vector<Rect> keeckers;
     //keecker_cascade.detectMultiScale(gray, keeckers, scale_factor, min_neighbors, 0,  Size(20, 20), Size(200,200));
     keecker_cascade.detectMultiScale(gray, keeckers, scale_factor, min_neighbors, 0,  Size(20, 20), gray.size());
-    
 //    keecker_cascade.detectMultiScale(gray, keeckers, reject_levels, level_weights, scale_factor, min_neighbors, 0, Size(60, 13), img.size(), true);
 
-
-    for (int i=0; i<(int)keeckers.size(); i++){
-        Point2f p1(keeckers[i].x, keeckers[i].y);
-        Point2f p2(keeckers[i].x+keeckers[i].width, keeckers[i].y+keeckers[i].width);
-        rectangle(frame, p1, p2, Scalar(255,255,0),2); //color is the last para
-    }
-    imshow("frame", frame);
     return keeckers;
-}
-
-vector<KeyPoint> detect_blobs2(Mat& frame, vector<Rect> ROIs){
-    vector<KeyPoint> blobs;
-    if (ROIs.size() <=0){
-        return blobs;
-    }
-    
-    for (int i=0; i<ROIs.size(); i++){
-        Rect roi = ROIs[i];
-        
-    }
-    
 }
 
 Rect detect_movement(Mat& frame){
@@ -321,18 +349,20 @@ Rect detect_movement(Mat& frame){
     COUNT ++;
     return bbox_union;
 }
-vector<Point2f> detect_blobs(Mat& frame, Rect& ROI, SimpleBlobDetector::Params& params){ 
+Point2f detect_blobs(const Mat& frame, const Rect& ROI, const SimpleBlobDetector::Params& params){ 
     
-    /* Input image should refer to the keecker (bounding boxed)
-    Returns a vector of keypoints
+    /* Assumes input of grayscale frame (entire)
+    ROI is the keecker bounding box.
     */
     
     //cout << "detect blob is called" << endl;
     vector<Point2f> blob_positions;
-    if (ROI.width ==0){return blob_positions;}
+    if (ROI.width ==0){return Point2f(0,0);}
     
     Mat img(frame, ROI);
-    
+    imshow("before",img);
+    threshold(img, img, 110, 255,THRESH_BINARY);//todo: dynamic threshold selection?
+    imshow("After", img);
     cv::Ptr<cv::SimpleBlobDetector> detector = cv::SimpleBlobDetector::create(params);
     std::vector<cv::KeyPoint> keypoints;
     detector->detect(img, keypoints);
@@ -341,26 +371,26 @@ vector<Point2f> detect_blobs(Mat& frame, Rect& ROI, SimpleBlobDetector::Params& 
     //cout << "Before loc filter: " << keypoints.size() << endl;
     //keypoints = filter_loc(img.size().width, img.size().height, keypoints);//turn off the location filter
     //cout << "After loc filter: " << keypoints.size() <<endl;
-    cout << "Filtering... "<< endl;
+    //cout << "Filtering... "<< endl;
     int id = myfilter(img,keypoints);
-    cout << "   best idx: " << id << endl;
+    //cout << "   best idx: " << id << endl;
     if (keypoints.size() > 0){//todo: negate and return 
         for (std:: vector<cv::KeyPoint>::iterator bIterator=keypoints.begin(); bIterator!=keypoints.end(); bIterator++){
-            cout << "here" << endl;
-            cout << "size of blob: " << bIterator->size << endl;
-            cout << "   at: " << bIterator->pt.x << ", " << bIterator->pt.y << endl;
-            cout << "" <<endl;
+//            cout << "here" << endl;
+//            cout << "size of blob: " << bIterator->size << endl;
+//            cout << "   at: " << bIterator->pt.x << ", " << bIterator->pt.y << endl;
+//            cout << "" <<endl;
             blob_positions.push_back(Point(bIterator->pt.x, bIterator->pt.y));
         }
-
 
         //--Draw detected blobs as red circles
         Mat im_out;
         frame.copyTo(im_out);
+        //for debug
         drawKeypoints(img, keypoints, im_out, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
         Point2f best(keypoints[id].pt.x, keypoints[id].pt.y);
         Point2f temp(best.x+3, best.y+3);
-        rectangle( im_out, best, temp, Scalar(255,0,0), 2, 8, 0 );
+        //rectangle( im_out, best, temp, Scalar(255,0,0), 2, 8, 0 );
         
         int biggest_idx = getBiggestIdx(keypoints);
         Point2f biggest = keypoints[biggest_idx].pt;
@@ -369,7 +399,8 @@ vector<Point2f> detect_blobs(Mat& frame, Rect& ROI, SimpleBlobDetector::Params& 
 
         imshow("detect blob", im_out);
 
-        return blob_positions;
+        Point2f blob_world(biggest.x+ROI.x, biggest.y+ROI.y);
+        return blob_world;
     }
 }
 
@@ -422,7 +453,7 @@ Rect getBbox(const Mat& img, Mat& mask, Mat& dst){
     return boundRect[largestComp];
 }
 
-int getBiggestIdx(vector<KeyPoint>& keypoints){
+int getBiggestIdx(const vector<KeyPoint>& keypoints){
     /*assume im_src is a adpative-threshed image of the original frame
     *It's assumed to be of type 0, CV_8U3
     */
@@ -441,19 +472,49 @@ int getBiggestIdx(vector<KeyPoint>& keypoints){
         
     return biggest_idx;
 }
+//
+Rect scaleRect(const Mat& im, const Rect& rect, double scale){
+    /*
+    im is passed in for checking the boundaries when enlarging the rects. 
+    clip the new values.
+    */
+    if(rect.width==0){
+        return Rect(0,0,0,0);
+    }
+    
+    Point2f tl_0(rect.x, rect.y);
+    Point2f d_0(rect.width/2, rect.height/2);
+    Point2f c = tl_0 + d_0;
+    
+    Point2f d_1 = d_0*sqrt(scale);
+    Point2f temp1 = c-d_1;
+    //cout << "Temp1: " << temp1 << endl;
+    float x,y;
+    x = max(0.0f,temp1.x);
+    y = max(0.0f,temp1.y);
+    Point2f tl_1(x,y);
+    
+    Point2f temp2 = c+d_1;
+    //cout << "Temp2: " << temp2 << endl;
+    x = min((float)im.size().width-1, temp2.x);
+    y = min((float)im.size().height-1, temp2.y);
+    Point2f br_1(x,y);
+    
+    Rect scaled(tl_1,br_1);
+    return scaled;
+}
 
-
-int myfilter(Mat& im_src, vector<KeyPoint>& keypoints){
+int myfilter(const Mat& im_src, const vector<KeyPoint>& keypoints){
     /*assume im_src is a blurred image of the original frame
     *It's assumed to be of type 0, CV_8U3
     */
-    cout << "here!!!!! " << im_src.depth() << endl;
+    //cout << "here!!!!! " << im_src.depth() << endl;
     if (keypoints.size()<=0){
         return -1;
     }
     Mat im;
     im_src.convertTo(im, CV_64FC3);
-    cout << "again " << im.depth() << endl;
+    //cout << "again " << im.depth() << endl;
     vector<KeyPoint> filtered;
     int best_idx;
     double best_cost=1000000;
@@ -497,13 +558,13 @@ int myfilter(Mat& im_src, vector<KeyPoint>& keypoints){
         cost = ((255-avg_outer) + (avg_center))*alpha*r; //penalize it by the number at center portion (we prefer smaller blobs);        
         
         //Report for debug
-        cout << "new X,y: " << _x << ", " << _y << endl;
-        cout << "Npixel CENTER: " << n_center << endl;
-        cout << "Avg_center: " << avg_center << endl;
-        cout << "Npixel OUTER: " << n_outer << endl;
-        cout << "Avg_outer: " << avg_outer << endl;
-        cout << "cost: " << cost << endl;
-        cout << endl;
+//        cout << "new X,y: " << _x << ", " << _y << endl;
+//        cout << "Npixel CENTER: " << n_center << endl;
+//        cout << "Avg_center: " << avg_center << endl;
+//        cout << "Npixel OUTER: " << n_outer << endl;
+//        cout << "Avg_outer: " << avg_outer << endl;
+//        cout << "cost: " << cost << endl;
+//        cout << endl;
         
         if (cost<best_cost){
             best_idx=i;
