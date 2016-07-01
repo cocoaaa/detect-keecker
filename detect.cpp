@@ -17,7 +17,7 @@ using namespace std;
 using namespace cv;
 
 /** Function Headers */
-vector<Rect> detect_haar(const Mat& frame);
+vector<Rect> detect_haar(const Mat& frame, CascadeClassifier& classifier);
 Point2f detect_blobs(const Mat& frame, const Rect& ROI, const SimpleBlobDetector::Params& params);
 int myfilter(const Mat& im_src, const vector<KeyPoint>& keypoints);
 int getBiggestIdx(const vector<KeyPoint>& keypoints);
@@ -31,7 +31,9 @@ Rect getBbox(const Mat& img, Mat& mask, Mat& dst);
 mutex mtx;
 Mat frame;
 String keecker_cascade_name = "../classifier/haarcascade_keecker2.xml";
+String fisheye_cascade_name = "../classifier/haarcascade_fisheye.xml";
 CascadeClassifier keecker_cascade;
+CascadeClassifier fisheye_cascade;
 string IMG_PATH = "/Users/hayley/opencv-haar-classifier-training/positive_images/";
 string IMG_PATH2 = "/Users/hayley/opencv-stuff/Playground/detect/images/test/";
 int COUNT=0;
@@ -104,8 +106,7 @@ void test_detect_blobs(){
         waitKey(0);
     }
 }
-void test_detect_blobs2(){
-    
+void test_detect_blobs2(){ 
     cout << "Test detect_blobs2....." << endl;
     string FILE_PATH = "/Users/hayley/opencv-stuff/Playground/detect/imageslist.txt";
 
@@ -162,6 +163,11 @@ void test_scaleRect(){
     rectangle(im, Point2f(r1.x, r1.y), Point2f(r1.x+r1.width, r1.y+r1.height),Scalar(0,255,0));//Green
     imshow("test scale", im);
 }
+void test_haar_fisheye(){
+    
+    
+    
+}
 
 int main(int argc, char** argv){
 
@@ -170,10 +176,14 @@ int main(int argc, char** argv){
     int count;
     string outname;
 
-    //-- Load keecker cascade
+    //-- Load cascades
     if( !keecker_cascade.load( keecker_cascade_name ) ){ printf("--(!)Error loading\n"); return -1; };
+    if( !fisheye_cascade.load( fisheye_cascade_name ) ){ printf("--(!)Error loading\n"); return -1; };
+    
     //test_detect_blobs2();
     //test_scaleRect();
+    test_haar_fisheye();
+    
     while((key = waitKey(30)) != 27){ 
         Mat m;
         mtx.lock();
@@ -199,14 +209,17 @@ int main(int argc, char** argv){
             cv::SimpleBlobDetector::Params params; 
             params.filterByArea = true;
             params.minArea = 3.0;//todo: percentage of total pixel
-//            params.maxArea = round(total_pixels*0.01);//todo
-//            cout << "max area: " << params.maxArea << endl;
+            
             params.filterByCircularity = true;
             params.minCircularity = 0.65;
 
             params.filterByConvexity = true;
             params.minConvexity = 0.95;
-            vector<Rect> keeckers = detect_haar(m);
+            vector<Rect> keeckers = detect_haar(m, keecker_cascade);
+            
+            //Testing 
+            Rect k0 = keeckers[0];
+            
             for (int i =0; i<(int)keeckers.size(); i++){
                 Point2f p(keeckers[i].x, keeckers[i].y );
                 cout << "keecker idx: " << i << endl;
@@ -229,7 +242,7 @@ int main(int argc, char** argv){
                 
                 //--Set maxArea parameter
                 int roi_npixels = ROI.width*ROI.height;
-                params.maxArea = round(roi_npixels*0.01);//todo
+                params.maxArea = round(roi_npixels*0.001);//todo
                 cout << "max area: " << params.maxArea << endl;
                 blob = detect_blobs(binary,ROI,params);
                 
@@ -301,7 +314,7 @@ int main(int argc, char** argv){
     fastLoop.join();
 }
 
-vector<Rect> detect_haar(const Mat& frame){
+vector<Rect> detect_haar(const Mat& frame, CascadeClassifier& classifier){
     Mat gray;
     
     cvtColor(frame, gray, CV_BGR2GRAY);
@@ -309,16 +322,13 @@ vector<Rect> detect_haar(const Mat& frame){
     //--Detect keeckers
     //--Set parameters
     const float scale_factor(1.2f);
-    const int min_neighbors(15);
-    vector<int> reject_levels;
-    vector<double> level_weights;
-    
-    vector<Rect> keeckers;
+    const int min_neighbors = 15;
+    vector<Rect> obj_bboxes;
     //keecker_cascade.detectMultiScale(gray, keeckers, scale_factor, min_neighbors, 0,  Size(20, 20), Size(200,200));
-    keecker_cascade.detectMultiScale(gray, keeckers, scale_factor, min_neighbors, 0,  Size(20, 20), gray.size());
+    classifier.detectMultiScale(gray, obj_bboxes, scale_factor, min_neighbors, 0,  Size(20, 20), gray.size());
 //    keecker_cascade.detectMultiScale(gray, keeckers, reject_levels, level_weights, scale_factor, min_neighbors, 0, Size(60, 13), img.size(), true);
 
-    return keeckers;
+    return obj_bboxes;
 }
 
 Rect detect_movement(Mat& frame){
@@ -360,9 +370,7 @@ Point2f detect_blobs(const Mat& frame, const Rect& ROI, const SimpleBlobDetector
     if (ROI.width ==0){return Point2f(0,0);}
     
     Mat img(frame, ROI);
-    imshow("before",img);
     threshold(img, img, 110, 255,THRESH_BINARY);//todo: dynamic threshold selection?
-    imshow("After", img);
     cv::Ptr<cv::SimpleBlobDetector> detector = cv::SimpleBlobDetector::create(params);
     std::vector<cv::KeyPoint> keypoints;
     detector->detect(img, keypoints);
